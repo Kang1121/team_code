@@ -11,7 +11,7 @@ cd team_code
 conda env create -f environment.yml
 ```
 ### Run
-put data under folder "data"
+create "data", "results" and "checkpoints" three folders by yourself, and put data under folder "data"
 ```
 python main.py
 ```
