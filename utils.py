@@ -148,7 +148,7 @@ def subs_preorder():
             1, 38, 51, 8, 11, 16, 28, 44, 24, 52, 3, 26, 39, 50, 6, 23, 2, 14, 25, 20, 10, 33, 22, 43, 36, 30]
 
 
-def training_module(loader, model, optimizer, device, train_mode):
+def training_module(loader, model, optimizer, device, train_mode, mixup=False):
 
     if train_mode:
         model.network.train()
@@ -163,8 +163,13 @@ def training_module(loader, model, optimizer, device, train_mode):
     for batch_idx, (data, label) in enumerate(loader):
 
         data, label = data.to(device), label.to(device)
-        output = model.network(data)
-        loss = F.nll_loss(output, label)
+        if mixup and train_mode:
+            data, label_a, label_b, lam = mixup_data(data, label, 1.0, True)
+            output = model.network(data)
+            loss = mixup_criterion(F.nll_loss, output, label_a, label_b, lam)
+        else:
+            output = model.network(data)
+            loss = F.nll_loss(output, label)
         loss_all += loss.item()
         acc_all += accuracy(output.detach().cpu().numpy(), label)
 
@@ -174,6 +179,30 @@ def training_module(loader, model, optimizer, device, train_mode):
             optimizer.step()
 
     return loss_all / len(loader), acc_all / len(loader)
+
+
+def mixup_criterion(criterion, pred, y_a, y_b, lam):
+    return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
+
+
+def mixup_data(x, y, alpha=1.0, use_cuda=True):
+    """Returns mixed inputs, pairs of targets, and lambda"""
+
+    if alpha > 0:
+        lam = np.random.beta(alpha, alpha)
+    else:
+        lam = 1
+
+    batch_size = x.size()[0]
+    if use_cuda:
+        index = torch.randperm(batch_size).cuda()
+    else:
+        index = torch.randperm(batch_size)
+
+    mixed_x = lam * x + (1 - lam) * x[index, :]
+    y_a, y_b = y, y[index]
+
+    return mixed_x, y_a, y_b, lam
 
 
 class EarlyStopping:

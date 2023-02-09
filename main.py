@@ -21,7 +21,7 @@ def main():
     parser.add_argument('-n_epochs', type=int, default=200, help='number of epochs')
     parser.add_argument('-batch_size', type=int, default=64, help='batch size')
     parser.add_argument('-gpu', type=str, default='cuda:1', help='gpu device')
-
+    parser.add_argument('-mixup', type=bool, default=True, help='mixup augmentation')
 
     args, _ = parser.parse_known_args()
 
@@ -61,12 +61,12 @@ def train(args):
             valid_loader = DataLoader(TensorDataset(torch.from_numpy(x_valid).float().unsqueeze(3), torch.from_numpy(y_valid).long()), batch_size=64, shuffle=False)
             test_loader = DataLoader(TensorDataset(torch.from_numpy(x_test).float().unsqueeze(3), torch.from_numpy(y_test).long()), batch_size=64, shuffle=False)
 
-            early_stopping = EarlyStopping(patience=20, verbose=True, path='{}/checkpoint.pth'.format(model_path))
+            early_stopping = EarlyStopping(patience=20, verbose=True, path='{}/checkpoint_sub{}.pth'.format(model_path, test_subj))
 
             for epoch in range(args.n_epochs):
 
-                loss_train, acc_train = training_module(train_loader, model, optimizer, args.gpu, True)
-                loss_valid, acc_valid = training_module(valid_loader, model, optimizer, args.gpu, False)
+                loss_train, acc_train = training_module(train_loader, model, optimizer, args.gpu, True, args.mixup)
+                loss_valid, acc_valid = training_module(valid_loader, model, optimizer, args.gpu, False, args.mixup)
                 print('Epoch: {:03d}, Train Loss: {:.5f}, Train Acc: {:.5f}, Valid Loss: {:.5f}, Valid Acc: {:.5f}'.format(epoch, loss_train, acc_train, loss_valid, acc_valid))
 
                 early_stopping(loss_valid, model)
@@ -74,7 +74,7 @@ def train(args):
                     print("Early stopping")
                     break
 
-            _, acc_test = training_module(test_loader, model, optimizer, args.gpu, False)
+            _, acc_test = training_module(test_loader, model, optimizer, args.gpu, False, args.mixup)
             print('Test Acc: {:.5f}'.format(acc_test))
 
             if args.outrm:
