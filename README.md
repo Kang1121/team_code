@@ -11,4 +11,6 @@ cd team_code
 conda env create -f environment.yml
 ```
 ### Run
+```
 python main.py
+```
