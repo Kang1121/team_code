@@ -39,8 +39,6 @@ def train(args):
     if not os.path.exists(model_path):
         os.makedirs(model_path)
 
-    early_stopping = EarlyStopping(patience=20, verbose=True, path='{}/checkpoint.pth'.format(model_path))
-
     for idx, test_subj in enumerate(order):  # 54 subjects LOSO
 
         model = model_zoo(args.model, args.dataset)
@@ -62,6 +60,8 @@ def train(args):
             train_loader = DataLoader(TensorDataset(torch.from_numpy(x_train).float().unsqueeze(3), torch.from_numpy(y_train).long()), batch_size=64, shuffle=True)
             valid_loader = DataLoader(TensorDataset(torch.from_numpy(x_valid).float().unsqueeze(3), torch.from_numpy(y_valid).long()), batch_size=64, shuffle=False)
             test_loader = DataLoader(TensorDataset(torch.from_numpy(x_test).float().unsqueeze(3), torch.from_numpy(y_test).long()), batch_size=64, shuffle=False)
+
+            early_stopping = EarlyStopping(patience=20, verbose=True, path='{}/checkpoint.pth'.format(model_path))
 
             for epoch in range(args.n_epochs):
 
