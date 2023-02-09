@@ -11,6 +11,7 @@ cd team_code
 conda env create -f environment.yml
 ```
 ### Run
+put data under folder "data"
 ```
 python main.py
 ```
