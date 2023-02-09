@@ -81,6 +81,8 @@ def train(args):
                 out_path = './results/{}_eps{}'.format(args.model, args.eps)
             else:
                 out_path = './results/{}_eps-1'.format(args.model)
+            if not os.path.exists(out_path):
+                os.makedirs(out_path)
             with open(os.path.join(out_path, 'test_acc.txt'), 'a') as f:
                 f.write('sub{}_fold{}: {}\n'.format(test_subj, cv_index, acc_test))
             f.close()
