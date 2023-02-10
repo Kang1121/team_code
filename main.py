@@ -52,7 +52,7 @@ def train(args):
 
             if args.outrm:
                 x_train, y_train = clustering(x_train, y_train, args.eps, args.min_samples)
-                # x_valid, y_valid = clustering(x_valid, y_valid, args.eps, args.min_samples)
+                x_valid, y_valid = clustering(x_valid, y_valid, args.eps, args.min_samples)
 
             x_train, y_train = np.concatenate(x_train, axis=0), np.concatenate(y_train, axis=0)
             x_valid, y_valid = np.concatenate(x_valid, axis=0), np.concatenate(y_valid, axis=0)
