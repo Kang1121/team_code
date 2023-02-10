@@ -2,7 +2,7 @@ import argparse
 from utils import *
 import numpy as np
 from sklearn.model_selection import KFold
-from braindecode.torch_ext.util import set_random_seeds
+from braindecode.util import set_random_seeds
 from torch.utils.data import DataLoader, TensorDataset
 import torch
 import os
@@ -20,7 +20,7 @@ def main():
     parser.add_argument('-min_samples', type=int, default=5, help='min_samples for DBSCAN')
     parser.add_argument('-n_epochs', type=int, default=200, help='number of epochs')
     parser.add_argument('-batch_size', type=int, default=64, help='batch size')
-    parser.add_argument('-gpu', type=str, default='cuda:1', help='gpu device')
+    parser.add_argument('-gpu', type=str, default='cuda:0', help='gpu device')
     parser.add_argument('-mixup', type=bool, default=True, help='mixup augmentation')
 
     args, _ = parser.parse_known_args()
@@ -43,7 +43,7 @@ def train(args):
 
         model = model_zoo(args.model, args.dataset)
         optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-        model.network.to(args.gpu)
+        model.to(args.gpu)
 
         cv_set = np.array(order[idx+1:] + order[:idx])
         for cv_index, (train_index, valid_index) in enumerate(kf.split(cv_set)):

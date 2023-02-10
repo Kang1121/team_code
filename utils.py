@@ -1,6 +1,6 @@
-# from braindecode.models import Deep4Net, EEGNetv4, EEGInception, EEGResNet, EEGITNet, TIDNet
-from braindecode.models.deep4 import Deep4Net
-from braindecode.models.eegnet import EEGNetv4
+from braindecode.models import Deep4Net, EEGNetv4, EEGInception, EEGResNet, EEGITNet, TIDNet
+# from braindecode.models.deep4 import Deep4Net
+# from braindecode.models.eegnet import EEGNetv4
 import torch.nn.functional as F
 import torch
 import h5py
@@ -22,17 +22,17 @@ def model_zoo(name, dataset):
         raise ValueError('Invalid dataset name: {}'.format(dataset))
 
     if name == 'Deep4Net':
-        model = Deep4Net(in_chans=channels, n_classes=num_classes, input_time_length=timepoints, final_conv_length='auto')
+        model = Deep4Net(in_chans=channels, n_classes=num_classes, input_window_samples=timepoints, final_conv_length='auto')
     elif name == 'EEGNetv4':
-        model = EEGNetv4(in_chans=channels, n_classes=num_classes, input_time_length=timepoints, final_conv_length='auto')
+        model = EEGNetv4(in_chans=channels, n_classes=num_classes, input_window_samples=timepoints, final_conv_length='auto')
     elif name == 'EEGInception':
-        model = EEGInception(in_chans=channels, n_classes=num_classes, input_time_length=timepoints)
+        model = EEGInception(in_channels=channels, n_classes=num_classes, input_window_samples=timepoints)
     elif name == 'EEGResNet':
-        model = EEGResNet(in_chans=channels, n_classes=num_classes, input_time_length=timepoints)
+        model = EEGResNet(in_chans=channels, n_classes=num_classes, input_window_samples=timepoints)
     elif name == 'EEGITNet':
-        model = EEGITNet(in_chans=channels, n_classes=num_classes, input_time_length=timepoints)
+        model = EEGITNet(in_channels=channels, n_classes=num_classes, input_window_samples=timepoints)
     elif name == 'TIDNet':
-        model = TIDNet(in_chans=channels, n_classes=num_classes, input_time_length=timepoints)
+        model = TIDNet(in_chans=channels, n_classes=num_classes, input_window_samples=timepoints)
     else:
         raise ValueError('Invalid model name: {}'.format(name))
 
@@ -151,11 +151,11 @@ def subs_preorder():
 def training_module(loader, model, optimizer, device, train_mode, mixup=False):
 
     if train_mode:
-        model.network.train()
+        model.train()
         # for param in model.parameters():
         #     param.requires_grad = True
     else:
-        model.network.eval()
+        model.eval()
         # for param in model.parameters():
         #     param.requires_grad = False
 
@@ -165,10 +165,10 @@ def training_module(loader, model, optimizer, device, train_mode, mixup=False):
         data, label = data.to(device), label.to(device)
         if mixup and train_mode:
             data, label_a, label_b, lam = mixup_data(data, label, 1.0, True)
-            output = model.network(data)
+            output = model(data)
             loss = mixup_criterion(F.nll_loss, output, label_a, label_b, lam)
         else:
-            output = model.network(data)
+            output = model(data)
             loss = F.nll_loss(output, label)
         loss_all += loss.item()
         acc_all += accuracy(output.detach().cpu().numpy(), label)
@@ -253,5 +253,5 @@ class EarlyStopping:
         if self.verbose:
             self.trace_func(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
         # model.save_networks(self.name)
-        torch.save(model.network.state_dict(), self.path)
+        torch.save(model.state_dict(), self.path)
         self.val_loss_min = val_loss
