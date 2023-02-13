@@ -1,29 +1,31 @@
 import argparse
+import os
+
+parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+                                 description='comparative runs')
+parser.add_argument('-dataset', type=str, default='sub54', help='dataset name')
+parser.add_argument('-model', type=str, default='EEGNetv4', help='model name')
+parser.add_argument('-fold', type=int, default=6, help='cross validation fold')
+parser.add_argument('-outrm', action='store_true', help='outlier removal')
+parser.add_argument('-eps', type=float, default=7, help='eps for DBSCAN')
+parser.add_argument('-min_samples', type=int, default=5, help='min_samples for DBSCAN')
+parser.add_argument('-n_epochs', type=int, default=200, help='number of epochs')
+parser.add_argument('-batch_size', type=int, default=64, help='batch size')
+parser.add_argument('-gpu', type=str, default='0', help='gpu device')
+parser.add_argument('-mixup', action='store_true', help='mixup augmentation')
+
+args, _ = parser.parse_known_args()
+os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+
 from utils import *
 import numpy as np
 from sklearn.model_selection import KFold
 from braindecode.util import set_random_seeds
 from torch.utils.data import DataLoader, TensorDataset
 import torch
-import os
 
 
 def main():
-
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-                                     description='comparative runs')
-    parser.add_argument('-dataset', type=str, default='sub54', help='dataset name')
-    parser.add_argument('-model', type=str, default='EEGNetv4', help='model name')
-    parser.add_argument('-fold', type=int, default=6, help='cross validation fold')
-    parser.add_argument('-outrm', type=bool, default=True, help='outlier removal')
-    parser.add_argument('-eps', type=float, default=7, help='eps for DBSCAN')
-    parser.add_argument('-min_samples', type=int, default=5, help='min_samples for DBSCAN')
-    parser.add_argument('-n_epochs', type=int, default=200, help='number of epochs')
-    parser.add_argument('-batch_size', type=int, default=64, help='batch size')
-    parser.add_argument('-gpu', type=str, default='cuda:0', help='gpu device')
-    parser.add_argument('-mixup', type=bool, default=True, help='mixup augmentation')
-
-    args, _ = parser.parse_known_args()
 
     set_random_seeds(seed=15485485, cuda=True)
 
@@ -39,11 +41,23 @@ def train(args):
     if not os.path.exists(model_path):
         os.makedirs(model_path)
 
+    if args.outrm:
+        out_path = './results/{}_eps{}'.format(args.model, args.eps)
+    else:
+        out_path = './results/{}_eps-1'.format(args.model)
+    if args.mixup:
+        out_path = out_path + '_mixup'
+    else:
+        out_path = out_path + '_nomixup'
+
+    if not os.path.exists(out_path):
+        os.makedirs(out_path)
+
     for idx, test_subj in enumerate(order):  # 54 subjects LOSO
 
         model = model_zoo(args.model, args.dataset)
         optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-        model.to(args.gpu)
+        model.cuda()
 
         cv_set = np.array(order[idx+1:] + order[:idx])
         for cv_index, (train_index, valid_index) in enumerate(kf.split(cv_set)):
@@ -77,15 +91,11 @@ def train(args):
             _, acc_test = training_module(test_loader, model, optimizer, args.gpu, False, args.mixup)
             print('Test Acc: {:.5f}'.format(acc_test))
 
-            if args.outrm:
-                out_path = './results/{}_eps{}'.format(args.model, args.eps)
-            else:
-                out_path = './results/{}_eps-1'.format(args.model)
-            if not os.path.exists(out_path):
-                os.makedirs(out_path)
             with open(os.path.join(out_path, 'test_acc.txt'), 'a') as f:
                 f.write('sub{}_fold{}: {}\n'.format(test_subj, cv_index, acc_test))
             f.close()
+
+            break
 
 
 if __name__ == "__main__":

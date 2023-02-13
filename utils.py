@@ -28,7 +28,7 @@ def model_zoo(name, dataset):
     elif name == 'EEGInception':
         model = EEGInception(in_channels=channels, n_classes=num_classes, input_window_samples=timepoints)
     elif name == 'EEGResNet':
-        model = EEGResNet(in_chans=channels, n_classes=num_classes, input_window_samples=timepoints)
+        model = EEGResNet(in_chans=channels, n_classes=num_classes, input_window_samples=timepoints, final_pool_length='auto', n_first_filters=30)
     elif name == 'EEGITNet':
         model = EEGITNet(in_channels=channels, n_classes=num_classes, input_window_samples=timepoints)
     elif name == 'TIDNet':
@@ -162,9 +162,9 @@ def training_module(loader, model, optimizer, device, train_mode, mixup=False):
     loss_all, acc_all = 0, 0
     for batch_idx, (data, label) in enumerate(loader):
 
-        data, label = data.to(device), label.to(device)
+        data, label = data.cuda(), label.cuda()
         if mixup and train_mode:
-            data, label_a, label_b, lam = mixup_data(data, label, 1.0, True)
+            data, label_a, label_b, lam = mixup_data(data, label, 1.0, device=device)
             output = model(data)
             loss = mixup_criterion(F.nll_loss, output, label_a, label_b, lam)
         else:
@@ -185,7 +185,7 @@ def mixup_criterion(criterion, pred, y_a, y_b, lam):
     return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
 
 
-def mixup_data(x, y, alpha=1.0, use_cuda=True):
+def mixup_data(x, y, alpha=1.0, device=None):
     """Returns mixed inputs, pairs of targets, and lambda"""
 
     if alpha > 0:
@@ -194,7 +194,7 @@ def mixup_data(x, y, alpha=1.0, use_cuda=True):
         lam = 1
 
     batch_size = x.size()[0]
-    if use_cuda:
+    if device:
         index = torch.randperm(batch_size).cuda()
     else:
         index = torch.randperm(batch_size)
