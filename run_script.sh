@@ -1,5 +1,4 @@
 conda activate good
-cd run
 
 # Fix file locking disabled on this file system (/scratch) when reading hdf5
 export HDF5_USE_FILE_LOCKING='FALSE'
@@ -13,7 +12,6 @@ python main.py -model xxxxx -eps 11 -fold 6 -gpu 0 -mixup -outrm &&
 python main.py -model xxxxx -eps 13 -fold 6 -gpu 0 -mixup -outrm &&
 python main.py -model xxxxx -eps 13 -fold 6 -gpu 0 -mixup -outrm
 
-cd ~
 conda deactivate
 
 wait
