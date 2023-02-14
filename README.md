@@ -17,4 +17,6 @@ python main.py
 ```
 
 ### Run with shell
+```
 source run_script.sh
+```
