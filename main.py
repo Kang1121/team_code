@@ -1,5 +1,7 @@
 import argparse
 import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
                                  description='comparative runs')
@@ -9,10 +11,12 @@ parser.add_argument('-fold', type=int, default=6, help='cross validation fold')
 parser.add_argument('-outrm', action='store_true', help='outlier removal')
 parser.add_argument('-eps', type=float, default=7, help='eps for DBSCAN')
 parser.add_argument('-min_samples', type=int, default=5, help='min_samples for DBSCAN')
-parser.add_argument('-n_epochs', type=int, default=200, help='number of epochs')
+parser.add_argument('-n_epochs', type=int, default=3000, help='number of epochs')
 parser.add_argument('-batch_size', type=int, default=64, help='batch size')
 parser.add_argument('-gpu', type=str, default='0', help='gpu device')
 parser.add_argument('-mixup', action='store_true', help='mixup augmentation')
+parser.add_argument('-test', action='store_true', help='mixup augmentation')
+parser.add_argument('-LRP', action='store_true', help='mixup augmentation')
 
 args, _ = parser.parse_known_args()
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
@@ -37,26 +41,31 @@ def train(args):
     data = load_data(args.dataset)
     order = subs_preorder()
     kf = KFold(n_splits=args.fold)
-    model_path = './checkpoints/{}'.format(args.model)
-    if not os.path.exists(model_path):
-        os.makedirs(model_path)
+
 
     if args.outrm:
         out_path = './results/{}_eps{}'.format(args.model, args.eps)
+        model_path = './checkpoints/{}_eps{}'.format(args.model, args.eps)
+
     else:
         out_path = './results/{}_eps-1'.format(args.model)
+        model_path = './checkpoints/{}_eps-1'.format(args.model, args.eps)
+
     if args.mixup:
         out_path = out_path + '_mixup'
+        model_path = model_path + '_mixup'
     else:
         out_path = out_path + '_nomixup'
+        model_path = model_path + '_nomixup'
 
     if not os.path.exists(out_path):
         os.makedirs(out_path)
-
+    if not os.path.exists(model_path):
+        os.makedirs(model_path)
     for idx, test_subj in enumerate(order):  # 54 subjects LOSO
 
         model = model_zoo(args.model, args.dataset)
-        optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.0005)
         model.cuda()
 
         cv_set = np.array(order[idx+1:] + order[:idx])
@@ -71,24 +80,29 @@ def train(args):
             x_train, y_train = np.concatenate(x_train, axis=0), np.concatenate(y_train, axis=0)
             x_valid, y_valid = np.concatenate(x_valid, axis=0), np.concatenate(y_valid, axis=0)
 
-            train_loader = DataLoader(TensorDataset(torch.from_numpy(x_train).float().unsqueeze(3), torch.from_numpy(y_train).long()), batch_size=64, shuffle=True)
-            valid_loader = DataLoader(TensorDataset(torch.from_numpy(x_valid).float().unsqueeze(3), torch.from_numpy(y_valid).long()), batch_size=64, shuffle=False)
-            test_loader = DataLoader(TensorDataset(torch.from_numpy(x_test).float().unsqueeze(3), torch.from_numpy(y_test).long()), batch_size=64, shuffle=False)
+            x_train, x_valid, x_test = x_train.transpose((0, 2, 1)), x_valid.transpose((0, 2, 1)), x_test.transpose((0, 2, 1))
 
-            early_stopping = EarlyStopping(patience=20, verbose=True, path='{}/checkpoint_sub{}.pth'.format(model_path, test_subj))
+            train_loader = DataLoader(TensorDataset(torch.from_numpy(x_train).float().unsqueeze(1), torch.from_numpy(y_train).long()), batch_size=64, shuffle=True)
+            valid_loader = DataLoader(TensorDataset(torch.from_numpy(x_valid).float().unsqueeze(1), torch.from_numpy(y_valid).long()), batch_size=64, shuffle=False)
+            test_loader = DataLoader(TensorDataset(torch.from_numpy(x_test).float().unsqueeze(1), torch.from_numpy(y_test).long()), batch_size=64, shuffle=False)
 
-            for epoch in range(args.n_epochs):
+            if not args.test:
+                early_stopping = EarlyStopping(patience=40, verbose=True, path='{}/checkpoint_sub{}.pth'.format(model_path, test_subj))
 
-                loss_train, acc_train = training_module(train_loader, model, optimizer, args.gpu, True, args.mixup)
-                loss_valid, acc_valid = training_module(valid_loader, model, optimizer, args.gpu, False, args.mixup)
-                print('Epoch: {:03d}, Train Loss: {:.5f}, Train Acc: {:.5f}, Valid Loss: {:.5f}, Valid Acc: {:.5f}'.format(epoch, loss_train, acc_train, loss_valid, acc_valid))
+                for epoch in range(args.n_epochs):
 
-                early_stopping(loss_valid, model)
-                if early_stopping.early_stop:
-                    print("Early stopping")
-                    break
+                    loss_train, acc_train = training_module(train_loader, model, optimizer, args.gpu, True, args.mixup)
+                    loss_valid, acc_valid = training_module(valid_loader, model, optimizer, args.gpu, False, args.mixup)
+                    print('Epoch: {:03d}, Train Loss: {:.5f}, Train Acc: {:.5f}, Valid Loss: {:.5f}, Valid Acc: {:.5f}'.format(epoch, loss_train, acc_train, loss_valid, acc_valid))
 
-            _, acc_test = training_module(test_loader, model, optimizer, args.gpu, False, args.mixup)
+                    early_stopping(loss_valid, model)
+                    if early_stopping.early_stop:
+                        print("Early stopping")
+                        break
+            else:
+                model.load_state_dict(torch.load('{}/checkpoint_sub{}.pth'.format(model_path, test_subj)))
+
+            _, acc_test = training_module(test_loader, model, optimizer, args.gpu, False, args.mixup, LRP=args.LRP, sub=test_subj)
             print('Test Acc: {:.5f}'.format(acc_test))
 
             with open(os.path.join(out_path, 'test_acc.txt'), 'a') as f:

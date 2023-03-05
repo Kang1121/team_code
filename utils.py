@@ -4,18 +4,39 @@ from braindecode.models import Deep4Net, EEGNetv4, EEGInception, EEGResNet, EEGI
 import torch.nn.functional as F
 import torch
 import h5py
+import os
 from os.path import join as pjoin
 from sklearn.cluster import DBSCAN, KMeans
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import numpy as np
+from captum.attr import LRP, LayerLRP
+import mne
+import matplotlib.pyplot as plt
 
+
+CHANNELS = ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'FC5', 'FC1', 'FC2', 'FC6', 'T7', 'C3', 'Cz', 'C4', 'T8', 'TP9',
+            'CP5', 'CP1', 'CP2', 'CP6', 'TP10', 'P7', 'P3', 'Pz', 'P4', 'P8', 'PO9', 'O1', 'Oz', 'O2', 'PO10', 'FC3',
+            'FC4', 'C5', 'C1', 'C2', 'C6', 'CP3', 'CPz', 'CP4', 'P1', 'P2', 'POz', 'FT9', 'FTT9h', 'TTP7h', 'TP7',
+            'TPP9h', 'FT10', 'FTT10h', 'TPP8h', 'TP8', 'TPP10h', 'F9', 'F10', 'AF7', 'AF3', 'AF4', 'AF8', 'PO3', 'PO4']
+
+CHANNELS_56 = ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'FC5', 'FC1', 'FC2', 'FC6', 'T7', 'C3', 'Cz', 'C4', 'T8', 'TP9',
+            'CP5', 'CP1', 'CP2', 'CP6', 'TP10', 'P7', 'P3', 'Pz', 'P4', 'P8', 'PO9', 'O1', 'Oz', 'O2', 'PO10', 'FC3',
+            'FC4', 'C5', 'C1', 'C2', 'C6', 'CP3', 'CPz', 'CP4', 'P1', 'P2', 'POz', 'FT9', 'TP7',
+             'FT10', 'TP8', 'F9', 'F10', 'AF7', 'AF3', 'AF4', 'AF8', 'PO3', 'PO4']
+
+RESERVED = ['Fz', 'FC3', 'FC1', 'FC2', 'FC4', 'C5', 'C3', 'C1', 'Cz', 'C2', 'C4', 'C6', 'TP7', 'CP5', 'CP3', 'CP1', 'CPz',
+                'CP2', 'CP4', 'CP6', 'TP8', 'P7', 'P3', 'P1', 'Pz', 'P2', 'P4', 'P8', 'PO3', 'POz', 'PO4']
+
+# find the position of the reserved channels in the original channel list
+RESERVED_POS = [CHANNELS.index(ch) for ch in CHANNELS_56]
+RESERVED_POS.sort()
 
 def model_zoo(name, dataset):
     """Return a list of model names in the model zoo."""
 
     if dataset == 'sub54':
-        channels = 62
+        channels = 56
         timepoints = 1000
         num_classes = 2
     else:
@@ -70,6 +91,9 @@ def get_data(dfile, subj):
     dpath = '/s' + str(subj)
     X = dfile[pjoin(dpath, 'X')]
     Y = dfile[pjoin(dpath, 'Y')]
+
+    # use the reserved channels
+    X = X[:, RESERVED_POS, :]
 
     return X, Y
 
@@ -148,7 +172,7 @@ def subs_preorder():
             1, 38, 51, 8, 11, 16, 28, 44, 24, 52, 3, 26, 39, 50, 6, 23, 2, 14, 25, 20, 10, 33, 22, 43, 36, 30]
 
 
-def training_module(loader, model, optimizer, device, train_mode, mixup=False):
+def training_module(loader, model, optimizer, device, train_mode, mixup=False, LRP=False, sub=None):
 
     if train_mode:
         model.train()
@@ -159,17 +183,25 @@ def training_module(loader, model, optimizer, device, train_mode, mixup=False):
         # for param in model.parameters():
         #     param.requires_grad = False
 
+    n_labels = 2
+    attr_dict = {i: []  for i in range(n_labels)}
     loss_all, acc_all = 0, 0
     for batch_idx, (data, label) in enumerate(loader):
 
         data, label = data.cuda(), label.cuda()
+
         if mixup and train_mode:
             data, label_a, label_b, lam = mixup_data(data, label, 1.0, device=device)
-            output = model(data)
+            output = squeeze_final_output(model(data))
             loss = mixup_criterion(F.nll_loss, output, label_a, label_b, lam)
         else:
-            output = model(data)
+
+            output = squeeze_final_output(model(data))
             loss = F.nll_loss(output, label)
+            pred = output.argmax(dim=1)
+            if LRP:
+                attr_dict = get_chan_attr(model, model.conv_time, data, pred, attr_dict)
+
         loss_all += loss.item()
         acc_all += accuracy(output.detach().cpu().numpy(), label)
 
@@ -177,6 +209,11 @@ def training_module(loader, model, optimizer, device, train_mode, mixup=False):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+    if LRP:
+        for i in range(n_labels):
+            temp = sum(attr_dict[i]) / len(attr_dict[i])
+            temp = temp.mean(1).squeeze().detach().cpu().numpy().transpose(1, 0)
+            get_topomap(temp, sub=sub, task=task_type(i))
 
     return loss_all / len(loader), acc_all / len(loader)
 
@@ -203,6 +240,64 @@ def mixup_data(x, y, alpha=1.0, device=None):
     y_a, y_b = y, y[index]
 
     return mixed_x, y_a, y_b, lam
+
+
+def get_chan_attr(model, layer_name, data, label, attributions):
+
+    layer_lrp = LayerLRP(model, layer_name)
+
+    data_sorted = []
+    for i in range(len(attributions.keys())):
+        data_sorted.append(data[label == i])
+        for j in range(len(data_sorted[i])):
+            attr = layer_lrp.attribute(data_sorted[i][j].unsqueeze(0), i)
+            attributions[i].append(attr)
+
+    return attributions
+
+
+def get_topomap(data, sub=None, task=None):
+
+    fig = plt.figure(figsize=(4, 3), dpi=500)
+    ax1, ax2 = fig.add_axes([0.05, 0.1, 0.6, 0.8]), fig.add_axes([0.7, 0.1, 0.2, 0.8])
+    # Convert to mne object
+    # info = mne.create_info(ch_names=RESERVED, sfreq=250, ch_types='eeg')
+    info = mne.create_info(ch_names=CHANNELS_56, sfreq=250, ch_types='eeg')
+    montage = mne.channels.make_standard_montage(kind='standard_1020')
+    evoked = mne.EvokedArray(data, info=info, tmin=0)
+    times = np.arange(0.05, 3.95, 3.95)
+    evoked = evoked.set_montage(montage)
+    img = evoked.plot_topomap(times, ch_type='eeg', cmap='Spectral_r', res=16, image_interp='cubic', average=8, axes=[ax1, ax2], contours=4)
+
+    # if dir is not exist, create it
+    if not os.path.exists('lrp'):
+        os.makedirs('lrp')
+    img.savefig('lrp/sub{}_{}.png'.format(sub, task), dpi=500)
+
+def squeeze_final_output(x):
+    """Removes empty dimension at end and potentially removes empty time
+     dimension. It does  not just use squeeze as we never want to remove
+     first dimension.
+
+    Returns
+    -------
+    x: torch.Tensor
+        squeezed tensor
+    """
+
+    assert x.size()[3] == 1
+    x = x[:, :, :, 0]
+    if x.size()[2] == 1:
+        x = x[:, :, 0]
+    return x
+
+
+def task_type(task_label):
+
+    if task_label == 0:
+        return 'left'
+    elif task_label == 1:
+        return 'right'
 
 
 class EarlyStopping:
